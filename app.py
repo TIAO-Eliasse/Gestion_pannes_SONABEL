@@ -303,7 +303,7 @@ def build_network_map(df_map):
             hoverinfo="skip", showlegend=False,
         ))
     fig.update_layout(
-        map=dict(style="open-street-map"),
+       map=dict(style="carto-positron"),
         margin=dict(l=0, r=0, t=8, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
         font=dict(family="Inter, sans-serif"),
