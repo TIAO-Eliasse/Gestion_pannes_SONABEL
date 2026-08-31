@@ -283,74 +283,140 @@ def circle_points(lat, lon, radius_m, n=48):
     d_lon = radius_m / (111320 * np.cos(lat_r) + 1e-9)
     angles = np.linspace(0, 2 * np.pi, n)
     return lat + d_lat * np.sin(angles), lon + d_lon * np.cos(angles)
+# ✅ REMPLACER LA FONCTION build_network_map() PAR CELLE-CI
+
 def build_network_map(df_map):
-    """Construit la carte avec gestion d'erreurs complète."""
+    """Construit la carte avec gestion complète des erreurs et diagnostic."""
     
-    # Vérifications préalables
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 1 : Vérification basique
+    # ════════════════════════════════════════════════════════════
     if df_map is None or df_map.empty:
-        # Retourne une carte vide avec message
         fig = go.Figure()
-        fig.add_annotation(text="Aucun poste ne correspond aux filtres sélectionnés",
-                          xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.add_annotation(
+            text="Aucun poste ne correspond aux filtres sélectionnés.",
+            xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
+        )
+        fig.update_layout(height=460, mapbox_style="open-street-map")
         return fig
     
-    # Normaliser les noms de colonnes (gérer les variantes de casse)
-    cols_lower = {col.lower(): col for col in df_map.columns}
-    lat_col = cols_lower.get('latitude') or cols_lower.get('lat')
-    lon_col = cols_lower.get('longitude') or cols_lower.get('lon')
-    
-    if not lat_col or not lon_col:
-        st.error(f"❌ Colonnes manquantes : Latitude et/ou Longitude introuvables.\n"
-                f"Colonnes disponibles : {', '.join(df_map.columns)}")
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 2 : Vérifier les colonnes essentielles
+    # ════════════════════════════════════════════════════════════
+    required_cols = ["Latitude", "Longitude", "ID_Poste", "statut"]
+    missing_cols = [c for c in required_cols if c not in df_map.columns]
+    if missing_cols:
+        st.error(f"❌ Colonnes manquantes : {', '.join(missing_cols)}")
+        st.write("Colonnes disponibles :", df_map.columns.tolist())
         return go.Figure()
     
-    # Convertir en numeric, remplacer les erreurs par NaN
-    df_map[lat_col] = pd.to_numeric(df_map[lat_col], errors='coerce')
-    df_map[lon_col] = pd.to_numeric(df_map[lon_col], errors='coerce')
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 3 : Préparer les données (nettoyer + convertir)
+    # ════════════════════════════════════════════════════════════
+    df_work = df_map.copy()
     
-    # Supprimer les lignes avec lat/lon invalides
-    df_map = df_map.dropna(subset=[lat_col, lon_col])
+    # Convertir lat/lon en numeric
+    df_work["Latitude"] = pd.to_numeric(df_work["Latitude"], errors='coerce')
+    df_work["Longitude"] = pd.to_numeric(df_work["Longitude"], errors='coerce')
     
-    if df_map.empty:
-        st.warning("⚠️ Aucun poste avec coordonnées géographiques valides.")
+    # Supprimer les lignes avec NaN en lat/lon
+    initial_count = len(df_work)
+    df_work = df_work.dropna(subset=["Latitude", "Longitude"])
+    if len(df_work) < initial_count:
+        st.info(f"ℹ️ {initial_count - len(df_work)} postes ignorés (coordonnées invalides)")
+    
+    if df_work.empty:
+        st.warning("⚠️ Aucun poste avec coordonnées géographiques valides après nettoyage.")
         return go.Figure()
     
-    # Créer la carte
-    fig = px.scatter_mapbox(
-        df_map, 
-        lat=lat_col, 
-        lon=lon_col, 
-        color="statut",
-        color_discrete_map={
-            "Critique": CRITIQUE, 
-            "Surveillance": SURVEILLANCE, 
-            "Normal": NORMAL_C
-        },
-        hover_name="ID_Poste",
-        hover_data={
-            "Quartier": True, 
-            "risque": ":.1f",
-            lat_col: False, 
-            lon_col: False, 
-            "statut": False
-        },
-        zoom=11.5, 
-        height=460,
-    )
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 4 : Valider et nettoyer la colonne "statut"
+    # ════════════════════════════════════════════════════════════
+    statuts_attendus = {"Critique", "Surveillance", "Normal"}
+    statuts_uniques = df_work["statut"].fillna("MANQUANT").unique()
+    statuts_invalides = set(statuts_uniques) - statuts_attendus
     
-    fig.update_traces(marker=dict(size=13))
+    if "MANQUANT" in statuts_uniques:
+        st.warning(f"⚠️ {(df_work['statut'].isna()).sum()} postes ont un statut manquant")
+        df_work = df_work[df_work["statut"].notna()]
     
-    # Ajouter les zones d'alerte (rayon d'impact)
-    for _, src in df_map[df_map["statut_modele"] == "Critique"].iterrows():
-        if pd.notna(src[lat_col]) and pd.notna(src[lon_col]):
-            lats, lons = circle_points(src[lat_col], src[lon_col], RAYON_IMPACT_M)
-            fig.add_trace(go.Scattermapbox(
-                lat=lats, lon=lons, mode="lines",
-                line=dict(color=CRITIQUE, width=1.5),
-                fill="toself", fillcolor="rgba(178,58,46,0.12)",
-                hoverinfo="skip", showlegend=False,
-            ))
+    if statuts_invalides:
+        st.warning(f"⚠️ Statuts inattendus : {statuts_invalides}. Suppression…")
+        df_work = df_work[df_work["statut"].isin(statuts_attendus)]
     
+    if df_work.empty:
+        st.error("❌ Aucun poste avec un statut valide après nettoyage.")
+        return go.Figure()
+    
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 5 : Construire le color_discrete_map dynamiquement
+    # ════════════════════════════════════════════════════════════
+    color_map_full = {
+        "Critique": CRITIQUE, 
+        "Surveillance": SURVEILLANCE, 
+        "Normal": NORMAL_C
+    }
+    
+    # Ne garder que les couleurs pour les statuts présents
+    color_map_used = {k: v for k, v in color_map_full.items() if k in df_work["statut"].values}
+    
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 6 : Créer la carte Plotly
+    # ════════════════════════════════════════════════════════════
+    try:
+        fig = px.scatter_mapbox(
+            df_work, 
+            lat="Latitude", 
+            lon="Longitude", 
+            color="statut",
+            color_discrete_map=color_map_used,  # ← utiliser la version filtrée
+            hover_name="ID_Poste",
+            hover_data={
+                "Quartier": True, 
+                "risque": ":.1f",
+                "Latitude": False, 
+                "Longitude": False, 
+                "statut": False
+            },
+            zoom=11.5, 
+            height=460,
+        )
+    except Exception as e:
+        st.error(f"❌ Erreur lors de la création de la carte Plotly :")
+        st.code(str(e), language="python")
+        return go.Figure()
+    
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 7 : Personnaliser les marqueurs
+    # ════════════════════════════════════════════════════════════
+    fig.update_traces(marker=dict(size=13, opacity=0.8))
+    
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 8 : Ajouter les zones d'alerte (rayon d'impact)
+    # ════════════════════════════════════════════════════════════
+    try:
+        critiques = df_work[df_work["statut_modele"] == "Critique"]
+        for _, src in critiques.iterrows():
+            if pd.notna(src["Latitude"]) and pd.notna(src["Longitude"]):
+                lats, lons = circle_points(
+                    float(src["Latitude"]), 
+                    float(src["Longitude"]), 
+                    RAYON_IMPACT_M
+                )
+                fig.add_trace(go.Scattermapbox(
+                    lat=lats, lon=lons, mode="lines",
+                    line=dict(color=CRITIQUE, width=1.5),
+                    fill="toself", fillcolor="rgba(178,58,46,0.12)",
+                    hoverinfo="skip", showlegend=False,
+                ))
+    except KeyError:
+        st.warning("⚠️ Colonne 'statut_modele' manquante pour les zones d'alerte.")
+    except Exception as e:
+        st.warning(f"⚠️ Impossible d'ajouter les zones d'alerte : {str(e)}")
+    
+    # ════════════════════════════════════════════════════════════
+    # ÉTAPE 9 : Finaliser le layout
+    # ════════════════════════════════════════════════════════════
     fig.update_layout(
         mapbox_style="open-street-map",
         margin=dict(l=0, r=0, t=8, b=0),
