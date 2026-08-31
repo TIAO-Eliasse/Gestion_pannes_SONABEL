@@ -283,30 +283,81 @@ def circle_points(lat, lon, radius_m, n=48):
     d_lon = radius_m / (111320 * np.cos(lat_r) + 1e-9)
     angles = np.linspace(0, 2 * np.pi, n)
     return lat + d_lat * np.sin(angles), lon + d_lon * np.cos(angles)
-
 def build_network_map(df_map):
+    """Construit la carte avec gestion d'erreurs complète."""
+    
+    # Vérifications préalables
+    if df_map is None or df_map.empty:
+        # Retourne une carte vide avec message
+        fig = go.Figure()
+        fig.add_annotation(text="Aucun poste ne correspond aux filtres sélectionnés",
+                          xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+    
+    # Normaliser les noms de colonnes (gérer les variantes de casse)
+    cols_lower = {col.lower(): col for col in df_map.columns}
+    lat_col = cols_lower.get('latitude') or cols_lower.get('lat')
+    lon_col = cols_lower.get('longitude') or cols_lower.get('lon')
+    
+    if not lat_col or not lon_col:
+        st.error(f"❌ Colonnes manquantes : Latitude et/ou Longitude introuvables.\n"
+                f"Colonnes disponibles : {', '.join(df_map.columns)}")
+        return go.Figure()
+    
+    # Convertir en numeric, remplacer les erreurs par NaN
+    df_map[lat_col] = pd.to_numeric(df_map[lat_col], errors='coerce')
+    df_map[lon_col] = pd.to_numeric(df_map[lon_col], errors='coerce')
+    
+    # Supprimer les lignes avec lat/lon invalides
+    df_map = df_map.dropna(subset=[lat_col, lon_col])
+    
+    if df_map.empty:
+        st.warning("⚠️ Aucun poste avec coordonnées géographiques valides.")
+        return go.Figure()
+    
+    # Créer la carte
     fig = px.scatter_mapbox(
-        df_map, lat="Latitude", lon="Longitude", color="statut",
-        color_discrete_map={"Critique": CRITIQUE, "Surveillance": SURVEILLANCE, "Normal": NORMAL_C},
+        df_map, 
+        lat=lat_col, 
+        lon=lon_col, 
+        color="statut",
+        color_discrete_map={
+            "Critique": CRITIQUE, 
+            "Surveillance": SURVEILLANCE, 
+            "Normal": NORMAL_C
+        },
         hover_name="ID_Poste",
-        hover_data={"Quartier": True, "risque": True, "Latitude": False, "Longitude": False, "statut": False},
-        zoom=11.5, height=460,
+        hover_data={
+            "Quartier": True, 
+            "risque": ":.1f",
+            lat_col: False, 
+            lon_col: False, 
+            "statut": False
+        },
+        zoom=11.5, 
+        height=460,
     )
+    
     fig.update_traces(marker=dict(size=13))
+    
+    # Ajouter les zones d'alerte (rayon d'impact)
     for _, src in df_map[df_map["statut_modele"] == "Critique"].iterrows():
-        lats, lons = circle_points(src["Latitude"], src["Longitude"], RAYON_IMPACT_M)
-        fig.add_trace(go.Scattermapbox(
-            lat=lats, lon=lons, mode="lines",
-            line=dict(color=CRITIQUE, width=1.5),
-            fill="toself", fillcolor="rgba(178,58,46,0.12)",
-            hoverinfo="skip", showlegend=False,
-        ))
+        if pd.notna(src[lat_col]) and pd.notna(src[lon_col]):
+            lats, lons = circle_points(src[lat_col], src[lon_col], RAYON_IMPACT_M)
+            fig.add_trace(go.Scattermapbox(
+                lat=lats, lon=lons, mode="lines",
+                line=dict(color=CRITIQUE, width=1.5),
+                fill="toself", fillcolor="rgba(178,58,46,0.12)",
+                hoverinfo="skip", showlegend=False,
+            ))
+    
     fig.update_layout(
         mapbox_style="open-street-map",
         margin=dict(l=0, r=0, t=8, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
         font=dict(family="Inter, sans-serif"),
     )
+    
     return fig
 
 # ----------------------------------------------------------------------
