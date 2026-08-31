@@ -5,7 +5,7 @@ Cinq onglets :
   1. Accueil — présentation du dispositif
   2. Tableau de bord — vue d'ensemble, filtres, graphique des postes à risque
   3. Explicabilité — détail d'un poste + SHAP
-  4. Collaboration humain-IA — validation des alertes, journal des décisions
+  4. Collaboration humain-IA — validation des alertes, journal des décisionsF
   5. Agent IA — assistant conversationnel (API Anthropic)
 
 Lancement local :
@@ -284,6 +284,7 @@ def circle_points(lat, lon, radius_m, n=48):
     angles = np.linspace(0, 2 * np.pi, n)
     return lat + d_lat * np.sin(angles), lon + d_lon * np.cos(angles)
 # ✅ REMPLACER LA FONCTION build_network_map() PAR CELLE-CI
+# ✅ REMPLACER LA FONCTION build_network_map() PAR CELLE-CI
 
 def build_network_map(df_map):
     """Construit la carte avec gestion complète des erreurs et diagnostic."""
@@ -361,35 +362,45 @@ def build_network_map(df_map):
     color_map_used = {k: v for k, v in color_map_full.items() if k in df_work["statut"].values}
     
     # ════════════════════════════════════════════════════════════
-    # ÉTAPE 6 : Créer la carte Plotly
+    # ÉTAPE 6 : Créer la carte Plotly (using graph_objects pour compatibilité)
     # ════════════════════════════════════════════════════════════
     try:
-        fig = px.scatter_mapbox(
-            df_work, 
-            lat="Latitude", 
-            lon="Longitude", 
-            color="statut",
-            color_discrete_map=color_map_used,  # ← utiliser la version filtrée
-            hover_name="ID_Poste",
-            hover_data={
-                "Quartier": True, 
-                "risque": ":.1f",
-                "Latitude": False, 
-                "Longitude": False, 
-                "statut": False
-            },
-            zoom=11.5, 
-            height=460,
-        )
+        fig = go.Figure()
+        
+        # Créer une trace par statut (pour les couleurs discrètes)
+        for statut in color_map_used.keys():
+            df_statut = df_work[df_work["statut"] == statut]
+            if df_statut.empty:
+                continue
+            
+            hover_text = [
+                f"<b>{row['ID_Poste']}</b><br>" +
+                f"Quartier: {row.get('Quartier', 'N/A')}<br>" +
+                f"Risque: {row.get('risque', 'N/A')}%"
+                for _, row in df_statut.iterrows()
+            ]
+            
+            fig.add_trace(go.Scattermapbox(
+                lat=df_statut["Latitude"],
+                lon=df_statut["Longitude"],
+                mode="markers",
+                marker=dict(
+                    size=13,
+                    opacity=0.8,
+                    color=color_map_used[statut]
+                ),
+                text=hover_text,
+                hoverinfo="text",
+                name=statut,
+                showlegend=True,
+            ))
+        
     except Exception as e:
         st.error(f"❌ Erreur lors de la création de la carte Plotly :")
         st.code(str(e), language="python")
         return go.Figure()
     
-    # ════════════════════════════════════════════════════════════
-    # ÉTAPE 7 : Personnaliser les marqueurs
-    # ════════════════════════════════════════════════════════════
-    fig.update_traces(marker=dict(size=13, opacity=0.8))
+    # (Les marqueurs sont déjà personnalisés dans la création des traces)
     
     # ════════════════════════════════════════════════════════════
     # ÉTAPE 8 : Ajouter les zones d'alerte (rayon d'impact)
@@ -419,13 +430,19 @@ def build_network_map(df_map):
     # ════════════════════════════════════════════════════════════
     fig.update_layout(
         mapbox_style="open-street-map",
+        mapbox_zoom=11.5,
+        mapbox_center=dict(
+            lat=df_work["Latitude"].mean(),
+            lon=df_work["Longitude"].mean()
+        ),
+        height=460,
         margin=dict(l=0, r=0, t=8, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
         font=dict(family="Inter, sans-serif"),
+        showlegend=True,
     )
     
     return fig
-
 # ----------------------------------------------------------------------
 # SHAP — facteurs contributifs pour un poste
 # ----------------------------------------------------------------------
