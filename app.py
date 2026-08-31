@@ -284,9 +284,8 @@ def circle_points(lat, lon, radius_m, n=48):
     angles = np.linspace(0, 2 * np.pi, n)
     return lat + d_lat * np.sin(angles), lon + d_lon * np.cos(angles)
 
-
 def build_network_map(df_map):
-    fig = px.scatter_map(
+    fig = px.scatter_mapbox(
         df_map, lat="Latitude", lon="Longitude", color="statut",
         color_discrete_map={"Critique": CRITIQUE, "Surveillance": SURVEILLANCE, "Normal": NORMAL_C},
         hover_name="ID_Poste",
@@ -296,20 +295,19 @@ def build_network_map(df_map):
     fig.update_traces(marker=dict(size=13))
     for _, src in df_map[df_map["statut_modele"] == "Critique"].iterrows():
         lats, lons = circle_points(src["Latitude"], src["Longitude"], RAYON_IMPACT_M)
-        fig.add_trace(go.Scattermap(
+        fig.add_trace(go.Scattermapbox(
             lat=lats, lon=lons, mode="lines",
             line=dict(color=CRITIQUE, width=1.5),
             fill="toself", fillcolor="rgba(178,58,46,0.12)",
             hoverinfo="skip", showlegend=False,
         ))
     fig.update_layout(
-       map=dict(style="carto-positron"),
+        mapbox_style="open-street-map",
         margin=dict(l=0, r=0, t=8, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
         font=dict(family="Inter, sans-serif"),
     )
     return fig
-
 
 # ----------------------------------------------------------------------
 # SHAP — facteurs contributifs pour un poste
